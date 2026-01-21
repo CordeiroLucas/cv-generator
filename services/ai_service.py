@@ -59,7 +59,7 @@ def gerar_html_curriculo(api_key, dados_brutos, instrucoes_extras, imagens_vagas
 
     # Chamada API
     response = client.chat.completions.create(
-        model="gpt-4o-mini", # Necessário usar modelo que suporta visão
+        model="gpt-4.1-nano", # Necessário usar modelo que suporta visão
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": conteudo_mensagem}

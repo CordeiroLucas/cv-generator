@@ -4,7 +4,9 @@ import streamlit.components.v1 as components
 
 # Importando nossos módulos locais
 from utils import extrair_texto_arquivos, codificar_imagem
-from ai_service import gerar_html_curriculo
+from services.ai_service import gerar_html_curriculo
+
+from services.cache_service import buscar_cache, salvar_cache
 
 st.set_page_config(page_title="Gerador de Currículo IA", page_icon="📄", layout="centered")
 
@@ -64,7 +66,7 @@ if submitted:
         try:
             # 1. Processar Textos (Histórico)
             with st.spinner("Lendo seu histórico profissional..."):
-                texto_processado = extrair_texto_arquivos(uploaded_files)
+                texto_historico = extrair_texto_arquivos(uploaded_files)
             
             # 2. Processar Imagens (Vaga)
             imagens_b64 = []
@@ -73,14 +75,42 @@ if submitted:
                     for img in uploaded_images:
                         imagens_b64.append(codificar_imagem(img))
             
-            # 3. Gerar Currículo
-            with st.spinner("A IA está cruzando seus dados com a vaga..."):
-                html_final = gerar_html_curriculo(
-                    api_key, 
-                    texto_processado, 
-                    extra_context, 
-                    imagens_vagas=imagens_b64
-                )
+
+
+
+            #    --- OTIMIZAÇÃO DE CACHE ---
+            # Criamos uma "assinatura" única do pedido juntando histórico + contexto
+            # Nota: O cache funciona melhor com texto. Se a imagem mudar, o cache pode não pegar 
+            # a menos que convertamos a imagem em texto antes.
+            assinatura_pedido = f"{texto_historico[:5000]} || {extra_context}"
+            
+            html_final = None
+            origem = ""
+
+            with st.spinner("Verificando banco de vetores (Cache Inteligente)..."):
+                html_cached = buscar_cache(assinatura_pedido, threshold=0.05)
+            
+            if html_cached:
+                html_final = html_cached
+                origem = "⚡ CACHE REDIS (Custo Zero)"
+                st.balloons()
+            else:
+                with st.spinner("Gerando com OpenAI (Consumindo Tokens)..."):
+                    html_final = gerar_html_curriculo(
+                        api_key, 
+                        texto_historico, 
+                        extra_context, 
+                        imagens_vagas=imagens_b64
+                    )
+                    # Salva no Redis para a próxima vez
+                    salvar_cache(assinatura_pedido, html_final)
+                    origem = "🧠 OPENAI (Novo Gerado)"
+
+            # Feedback visual da economia
+            if "CACHE" in origem:
+                st.success(f"Sucesso! Resultado carregado do {origem}.")
+            else:
+                st.info(f"Resultado gerado via {origem}.")
             
             # 4. Salvar e Mostrar
             caminho_arquivo = f"output/{nome_arquivo.strip()}.html"
