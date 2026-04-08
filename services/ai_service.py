@@ -22,8 +22,6 @@ SYSTEM_PROMPT = """
 
 """
 
-# SYSTEM_PROMPT = PROMPT
-
 def gerar_html_curriculo(api_key, dados_brutos, instrucoes_extras, imagens_vagas=None):
     """
     Envia texto e imagens (opcional) para a OpenAI.
@@ -57,14 +55,13 @@ def gerar_html_curriculo(api_key, dados_brutos, instrucoes_extras, imagens_vagas
                 }
             })
 
-    # Chamada API
     response = client.chat.completions.create(
-        model="gpt-4.1-nano", # Necessário usar modelo que suporta visão
+        model="gpt-5-mini", # Necessário usar modelo que suporta visão
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": conteudo_mensagem}
         ],
-        temperature=0.7
+        temperature=1
     )
     
     html_content = response.choices[0].message.content

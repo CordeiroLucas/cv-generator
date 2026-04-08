@@ -10,5 +10,6 @@ wheels/
 .venv
 output/*
 input/*
+.vscode/*
 
 .env

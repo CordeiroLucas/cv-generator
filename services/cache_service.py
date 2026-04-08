@@ -13,8 +13,7 @@ INDEX_NAME = "idx:curriculos"
 VECTOR_DIM = 384  # Dimensão do modelo 'all-MiniLM-L6-v2'
 DISTANCE_METRIC = "COSINE" # Métrica de similaridade
 
-# --- Modelo de Embedding Local (GRÁTIS) ---
-# Carrega na primeira execução (pode demorar alguns segundos na inicialização)
+
 print("Carregando modelo de embedding local...")
 model = SentenceTransformer('all-MiniLM-L6-v2') 
 
