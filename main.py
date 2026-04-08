@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_KEY = os.getenv("OPENAI_API_KEY")
+# API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Importando nossos módulos locais
 from utils import extrair_texto_arquivos, codificar_imagem
@@ -22,9 +22,9 @@ if not os.path.exists('output'):
 st.title("📄 Gerador de Currículo")
 st.markdown("Envie seus dados e o **Print da Vaga** para gerar um CV 100% compatível.")
 
-# with st.sidebar:
-#     st.header("Configurações")
-#     api_key = st.text_input("OpenAI API Key", type="password")
+with st.sidebar:
+    st.header("Configurações")
+    API_KEY = st.text_input("OpenAI API Key", type="password")
 
 with st.form("cv_form"):
     col1, col2 = st.columns(2)
