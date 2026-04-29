@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-import json
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 from utils import extrair_texto_arquivos, codificar_imagem
@@ -9,24 +8,52 @@ from services.github_service import extrair_repositorios, buscar_info_github
 
 load_dotenv()
 
-KEYS_FILE = ".user_keys.json"
-
-def carregar_chaves():
-    if os.path.exists(KEYS_FILE):
-        with open(KEYS_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-def salvar_chaves(openai_key, groq_key):
-    with open(KEYS_FILE, "w") as f:
-        json.dump({"openai": openai_key, "groq": groq_key}, f)
-
 st.set_page_config(page_title="Gerador de Currículo", page_icon="⚡", layout="centered")
+
+# --- Ponte para LocalStorage (Cache do Navegador) ---
+# Esse componente invisível permite ler/gravar dados no navegador do usuário
+def local_storage_bridge():
+    js_code = """
+    <script>
+    const parent = window.parent;
+    
+    // Função para enviar dados para o Streamlit
+    function sendToStreamlit(key, value) {
+        parent.postMessage({
+            type: 'streamlit:setComponentValue',
+            value: {key: key, value: value}
+        }, '*');
+    }
+
+    // Escuta comandos do Streamlit para salvar
+    window.addEventListener('message', function(event) {
+        if (event.data.type === 'save_keys') {
+            localStorage.setItem('cv_gen_keys', JSON.stringify(event.data.keys));
+        }
+    });
+
+    // Ao carregar, tenta ler as chaves e enviar de volta
+    const saved = localStorage.getItem('cv_gen_keys');
+    if (saved) {
+        const keys = JSON.parse(saved);
+        // Enviamos um evento customizado que o Streamlit pode capturar via query_params ou session_state
+        // No Streamlit puro sem componentes extras, usamos um pequeno hack de input invisível
+        window.parent.document.dispatchEvent(new CustomEvent('keys_loaded', {detail: keys}));
+    }
+    </script>
+    """
+    components.html(js_code, height=0)
+
+# Para manter simples e sem dependências extras pesadas, usaremos o session_state 
+# e daremos a opção de preencher via campo de texto que persiste na sessão.
+# Como o Streamlit reseta o estado ao fechar a aba, o ideal para "cache real" 
+# no Streamlit de forma simples é o arquivo local (que já tínhamos).
+
+# MAS, se você quer evitar o arquivo, vou remover o .user_keys.json 
+# e usar o session_state, que mantém enquanto a aba estiver aberta.
 
 if not os.path.exists('output'):
     os.makedirs('output')
-
-saved_keys = carregar_chaves()
 
 st.title("📄 Gerador de Currículo")
 st.markdown("Gere um currículo premium adaptado para a vaga em segundos.")
@@ -40,20 +67,20 @@ with st.sidebar:
     st.header("⚙️ Configurações")
     provider = st.selectbox("Provedor de IA", ["OpenAI", "Groq (Grátis/Rápido)"], index=0)
     
+    # Usamos session_state para manter a chave durante a navegação
     if provider == "OpenAI":
-        default_key = saved_keys.get("openai", "")
-        API_KEY = st.text_input("OpenAI API Key", value=default_key, type="password")
+        if "openai_key" not in st.session_state:
+            st.session_state.openai_key = ""
+        API_KEY = st.text_input("OpenAI API Key", value=st.session_state.openai_key, type="password")
+        st.session_state.openai_key = API_KEY
     else:
-        default_key = saved_keys.get("groq", "")
-        API_KEY = st.text_input("Groq API Key", value=default_key, type="password")
+        if "groq_key" not in st.session_state:
+            st.session_state.groq_key = ""
+        API_KEY = st.text_input("Groq API Key", value=st.session_state.groq_key, type="password")
+        st.session_state.groq_key = API_KEY
         st.info("💡 Groq é ultra-rápido e grátis.")
 
-    if st.button("💾 Salvar Chaves Localmente"):
-        if provider == "OpenAI":
-            salvar_chaves(API_KEY, saved_keys.get("groq", ""))
-        else:
-            salvar_chaves(saved_keys.get("openai", ""), API_KEY)
-        st.success("Chaves salvas com sucesso!")
+    st.caption("As chaves são mantidas no cache da sessão do navegador.")
 
 with st.form("cv_form"):
     col1, col2 = st.columns(2)
@@ -107,7 +134,7 @@ if submitted:
     elif not nome_arquivo:
         st.error("⚠️ Defina um nome para o arquivo.")
     elif not uploaded_files:
-        st.warning("⚠️ Envie pelo menos um arquivo com seu histórico profissional.")
+        st.warning("⚠️ Envie pelo menos um arquivo com seu histórico.")
     else:
         try:
             with st.spinner("Lendo seu histórico..."):

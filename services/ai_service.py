@@ -1,32 +1,36 @@
 from openai import OpenAI
 from groq import Groq
 import os
+import re
 
 SYSTEM_PROMPT = """
 Role: Master ATS Optimizer & Senior Resume Designer.
-Goal: Create a HIGH-CONVERSION, 1-page A4 CV in HTML, perfectly optimized for ATS bots and human recruiters.
+Goal: Create a HIGH-CONVERSION, 1-page A4 CV in HTML.
 
-ATS & CONTENT STRATEGY:
-1. THE 1-PAGE RULE: Strictly limit content to one A4 page. Prioritize the 3 most relevant experiences/projects. Be concise.
-2. KEYWORD TARGETING: Identify the most important keywords from the JOB DESCRIPTION. Integrate them naturally into the 'Professional Summary' and 'Technical Skills' sections.
-3. PROJECT SELECTION: From the provided CANDIDATE DATA (and GitHub), select and highlight ONLY the projects that directly prove skills required by the job.
-4. STAR METHOD: Use the Situation-Task-Action-Result format for experiences, focusing on quantifiable metrics.
-5. NO HALLUCINATIONS: Use ONLY provided facts. If a skill is missing from source, do NOT add it.
+SECURITY & INTEGRITY RULES:
+1. NO SCRIPTS: Do NOT include any <script> tags or inline event handlers (onmouseover, onclick, etc.).
+2. DATA ISOLATION: Only use information contained between [CANDIDATE_DATA] tags.
+3. NO HALLUCINATIONS: Do NOT invent skills. If it's not in [CANDIDATE_DATA], it doesn't exist.
+4. STRICT OUTPUT: Return ONLY the raw HTML of the resume.
 
-VISUAL & SEMANTIC DESIGN (ATS Friendly):
-- Semantic HTML: Use <h1> for name, <h2> for sections, <ul>/<li> for lists. Avoid complex tables.
-- Modern Typography: Use clean sans-serif fonts (Inter/Roboto).
-- Print Optimization: CSS must include @page { size: A4; margin: 1.2cm; } and prevent page breaks inside sections.
-- Visual Hierarchy: Bold keywords and job titles to guide the human eye.
-
-TECHNICAL:
-- Output: RAW HTML ONLY. No markdown, no intro/outro.
-- Temperature: 0.0 (Strict fidelity).
+ATS STRATEGY:
+- Optimize for 1-page A4.
+- Highlight keywords from [JOB_DESCRIPTION] that exist in [CANDIDATE_DATA].
+- Use semantic HTML (h1, h2, ul, li).
 """
+
+def limpar_html_malicioso(html):
+    """
+    Filtro básico de segurança para prevenir XSS.
+    Remove tags <script> e handlers de eventos.
+    """
+    html = re.sub(r'<script.*?>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'on\w+\s*=', 'disallowed_event=', html, flags=re.IGNORECASE)
+    return html
 
 def gerar_html_curriculo(api_key, dados_brutos, instrucoes_extras, imagens_vagas=None, provider="openai", job_text=""):
     """
-    Gera o currículo otimizado para ATS em 1 página.
+    Gera o currículo com camadas de proteção contra injeção e XSS.
     """
     if provider == "openai":
         client = OpenAI(api_key=api_key)
@@ -35,27 +39,27 @@ def gerar_html_curriculo(api_key, dados_brutos, instrucoes_extras, imagens_vagas
         client = Groq(api_key=api_key)
         model = "meta-llama/llama-4-scout-17b-16e-instruct"
 
-    texto_usuario = f"""
-    SOURCE DATA (Candidate History):
+    # Delimitadores estritos para prevenir Prompt Injection
+    prompt_usuario = f"""
+    [CANDIDATE_DATA]
     {dados_brutos}
+    [/CANDIDATE_DATA]
     
-    TARGET JOB (Keywords to target):
+    [JOB_DESCRIPTION]
     {job_text}
+    [/JOB_DESCRIPTION]
     
-    EXTRA CONTEXT:
+    [EXTRA_CONTEXT]
     {instrucoes_extras}
+    [/EXTRA_CONTEXT]
     
-    STRICT TASK:
-    - Create a 1-page A4 CV.
-    - Highlight keywords from the TARGET JOB that exist in the SOURCE DATA.
-    - Select the best projects to match the job.
-    - DO NOT INVENT DATA.
+    TASK: Generate the CV based ONLY on the data above. Follow the SECURITY & INTEGRITY RULES.
     """
 
-    conteudo_final = texto_usuario
+    conteudo_final = prompt_usuario
 
     if imagens_vagas and provider == "openai":
-        conteudo_final = [{"type": "text", "text": texto_usuario}]
+        conteudo_final = [{"type": "text", "text": prompt_usuario}]
         for img_b64 in imagens_vagas:
             conteudo_final.append({
                 "type": "image_url",
@@ -64,8 +68,6 @@ def gerar_html_curriculo(api_key, dados_brutos, instrucoes_extras, imagens_vagas
                     "detail": "low"
                 }
             })
-    elif imagens_vagas and provider == "groq":
-        conteudo_final += "\n[Match against provided job text.]"
 
     response = client.chat.completions.create(
         model=model,
@@ -79,9 +81,10 @@ def gerar_html_curriculo(api_key, dados_brutos, instrucoes_extras, imagens_vagas
     
     html_content = response.choices[0].message.content
     
+    # Limpeza de markdown e sanitização
     if "```html" in html_content:
         html_content = html_content.split("```html")[1].split("```")[0]
     elif "```" in html_content:
         html_content = html_content.split("```")[1].split("```")[0]
         
-    return html_content.strip()
+    return limpar_html_malicioso(html_content.strip())

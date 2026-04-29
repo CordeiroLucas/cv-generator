@@ -47,7 +47,6 @@ dependencies = [
     "packaging==25.0",
     "pandas==2.3.3",
     "pillow==12.1.0",
-    "playwright==1.58.0",
     "protobuf==6.33.4",
     "pyarrow==23.0.0",
     "pydantic==2.12.5",

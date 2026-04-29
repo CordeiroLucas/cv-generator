@@ -1,53 +1,63 @@
 import requests
 import re
-import base64
+from urllib.parse import urlparse
 
 def extrair_repositorios(texto):
-    """Detecta links de repositórios ou perfis do GitHub no texto."""
-    # Padrão para perfis: github.com/usuario
-    # Padrão para repos: github.com/usuario/repo
-    padrao = r"github\.com/([\w-]+)/?([\w-]+)?"
-    matches = re.findall(padrao, texto)
-    return matches
+    """
+    Extrai duplas (usuario, repo) de links do GitHub usando Regex.
+    Suporta links de perfis e repositórios.
+    """
+    pattern = r"github\.com/([\w-]+)/?([\w-]+)?"
+    matches = re.findall(pattern, texto)
+    # Filtra para evitar pegar 'features', 'pulls', etc como usuários
+    blacklist = ['features', 'pulls', 'issues', 'marketplace', 'explore', 'trending']
+    return [m for m in matches if m[0] not in blacklist]
 
 def buscar_info_github(usuario, repo=None):
-    """Busca informações do GitHub via API pública."""
-    base_url = "https://api.github.com"
-    headers = {"Accept": "application/vnd.github.v3+json"}
-    
+    """
+    Busca informações técnicas do GitHub para enriquecer o contexto da IA.
+    Implementa validação básica contra SSRF.
+    """
     try:
+        # Validação Estrita de Segurança
+        if not re.match(r'^[\w-]+$', usuario):
+            return ""
+        if repo and not re.match(r'^[\w.-]+$', repo):
+            return ""
+
         if repo:
-            # Busca info de um repositório específico
-            url = f"{base_url}/repos/{usuario}/{repo}"
-            resp = requests.get(url, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                # Tenta buscar o README
-                readme_url = f"{base_url}/repos/{usuario}/{repo}/readme"
-                readme_resp = requests.get(readme_url, headers=headers)
-                readme_content = ""
-                if readme_resp.status_code == 200:
-                    readme_b64 = readme_resp.json().get("content", "")
-                    readme_content = base64.b64decode(readme_b64).decode('utf-8')[:2000] # Limite para não estourar tokens
-                
-                return f"""
-                PROJETO GITHUB: {data.get('name')}
-                Descrição: {data.get('description')}
-                Tecnologias: {data.get('language')}
-                Estrelas: {data.get('stargazers_count')}
-                Detalhes (README): {readme_content}
-                """
+            url = f"https://api.github.com/repos/{usuario}/{repo}"
+            readme_url = f"https://raw.githubusercontent.com/{usuario}/{repo}/main/README.md"
         else:
-            # Busca repositórios principais do usuário
-            url = f"{base_url}/users/{usuario}/repos?sort=updated&per_page=5"
-            resp = requests.get(url, headers=headers)
-            if resp.status_code == 200:
-                repos = resp.json()
-                contexto = f"PERFIL GITHUB: {usuario}\n"
-                for r in repos:
-                    contexto += f"- {r.get('name')}: {r.get('description')} (Tech: {r.get('language')})\n"
-                return contexto
+            url = f"https://api.github.com/users/{usuario}/repos"
+            readme_url = None
+
+        # Headers para evitar rate limit (opcional, mas bom ter)
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code != 200:
+            return ""
+
+        dados = response.json()
+        
+        if repo:
+            info = f"\nProjeto: {dados.get('name')}\nDescrição: {dados.get('description')}\nLinguagem: {dados.get('language')}\n"
+            # Tenta pegar um pedaço do README para contexto técnico
+            try:
+                r_readme = requests.get(readme_url, timeout=3)
+                if r_readme.status_code == 200:
+                    info += f"Trecho do README: {r_readme.text[:1000]}\n"
+            except:
+                pass
+            return info
+        else:
+            # Se for usuário, pega resumo dos 5 principais repos
+            resumo = f"\nUsuário GitHub: {usuario}\nRepositórios Recentes:\n"
+            for r in dados[:5]:
+                resumo += f"- {r.get('name')}: {r.get('description')} ({r.get('language')})\n"
+            return resumo
+
     except Exception as e:
-        return f"[Erro ao buscar GitHub para {usuario}: {str(e)}]"
-    
-    return ""
+        print(f"Erro ao acessar GitHub: {e}")
+        return ""
