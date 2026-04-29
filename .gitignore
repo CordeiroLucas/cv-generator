@@ -13,3 +13,4 @@ input/*
 .vscode/*
 
 .env
+.user_keys.json
