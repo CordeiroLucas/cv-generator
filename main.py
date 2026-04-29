@@ -1,30 +1,59 @@
 import streamlit as st
 import os
+import json
 import streamlit.components.v1 as components
-
 from dotenv import load_dotenv
+from utils import extrair_texto_arquivos, codificar_imagem
+from services.ai_service import gerar_html_curriculo
+from services.github_service import extrair_repositorios, buscar_info_github
 
 load_dotenv()
 
-# API_KEY = os.getenv("OPENAI_API_KEY")
+KEYS_FILE = ".user_keys.json"
 
-# Importando nossos módulos locais
-from utils import extrair_texto_arquivos, codificar_imagem
-from services.ai_service import gerar_html_curriculo
+def carregar_chaves():
+    if os.path.exists(KEYS_FILE):
+        with open(KEYS_FILE, "r") as f:
+            return json.load(f)
+    return {}
 
-# from services.cache_service import buscar_cache, salvar_cache
+def salvar_chaves(openai_key, groq_key):
+    with open(KEYS_FILE, "w") as f:
+        json.dump({"openai": openai_key, "groq": groq_key}, f)
 
 st.set_page_config(page_title="Gerador de Currículo", page_icon="⚡", layout="centered")
 
 if not os.path.exists('output'):
     os.makedirs('output')
 
+saved_keys = carregar_chaves()
+
 st.title("📄 Gerador de Currículo")
-st.markdown("Envie seus dados e o **Print da Vaga** para gerar um CV 100% compatível.")
+st.markdown("Gere um currículo premium adaptado para a vaga em segundos.")
+
+def truncar_texto(texto, limite=8000):
+    if len(texto) > limite:
+        return texto[:limite] + "\n... [Conteúdo truncado] ..."
+    return texto
 
 with st.sidebar:
-    st.header("Configurações")
-    API_KEY = st.text_input("OpenAI API Key", type="password")
+    st.header("⚙️ Configurações")
+    provider = st.selectbox("Provedor de IA", ["OpenAI", "Groq (Grátis/Rápido)"], index=0)
+    
+    if provider == "OpenAI":
+        default_key = saved_keys.get("openai", "")
+        API_KEY = st.text_input("OpenAI API Key", value=default_key, type="password")
+    else:
+        default_key = saved_keys.get("groq", "")
+        API_KEY = st.text_input("Groq API Key", value=default_key, type="password")
+        st.info("💡 Groq é ultra-rápido e grátis.")
+
+    if st.button("💾 Salvar Chaves Localmente"):
+        if provider == "OpenAI":
+            salvar_chaves(API_KEY, saved_keys.get("groq", ""))
+        else:
+            salvar_chaves(saved_keys.get("openai", ""), API_KEY)
+        st.success("Chaves salvas com sucesso!")
 
 with st.form("cv_form"):
     col1, col2 = st.columns(2)
@@ -37,126 +66,98 @@ with st.form("cv_form"):
     uploaded_files = st.file_uploader(
         "Seus currículos antigos ou arquivos de texto", 
         type=["pdf", "docx", "txt"], 
-        accept_multiple_files=True,
-        key="files_data"
+        accept_multiple_files=True
+    )
+    
+    links_input = st.text_area(
+        "Links Relevantes (GitHub, Portfólio)", 
+        placeholder="https://github.com/seu-usuario/seu-projeto",
+        height=70
     )
     
     st.subheader("2. A Vaga")
-    st.info("Tire prints da descrição da vaga no LinkedIn/Gupy e envie aqui. A IA vai ler a imagem.")
+    tab_text, tab_image = st.tabs(["Texto da Vaga", "Prints da Vaga"])
+    
+    with tab_text:
+        job_description_text = st.text_area(
+            "Cole a descrição da vaga aqui", 
+            placeholder="Ex: Requisitos: Python, AWS...",
+            height=150
+        )
+    
+    with tab_image:
+        st.info("A IA vai ler o conteúdo dos prints.")
+        uploaded_images = st.file_uploader(
+            "Prints da Vaga (máx 2)", 
+            type=["png", "jpg"], 
+            accept_multiple_files=True
+        )
 
-    uploaded_images = st.file_uploader(
-        "Prints da Vaga (máx 2)", 
-        type=["png", "jpg"], 
-        accept_multiple_files=True
-    )
-
-    if uploaded_images and len(uploaded_images) > 2:
-        st.warning("⚠️ O uso de mais de 2 prints pode consumir muitos tokens. Considere enviar apenas as partes principais.")
-        
     extra_context = st.text_area(
         "Observações Extras", 
-        placeholder="Ex: Quero destacar que tenho inglês fluente, mesmo que não esteja nos arquivos...",
+        placeholder="Ex: Quero destacar que tenho inglês fluente...",
         height=100
     )
     
-    submitted = st.form_submit_button("Gerar Currículo Otimizado 🚀", use_container_width=True)
+    submitted = st.form_submit_button("Gerar Currículo Premium 🚀", use_container_width=True)
 
 if submitted:
     if not API_KEY:
-        st.error("⚠️ Insira sua API Key.")
+        st.error("⚠️ Insira sua API Key na barra lateral.")
     elif not nome_arquivo:
         st.error("⚠️ Defina um nome para o arquivo.")
     elif not uploaded_files:
         st.warning("⚠️ Envie pelo menos um arquivo com seu histórico profissional.")
     else:
         try:
-            # 1. Processar Textos (Histórico)
-            with st.spinner("Lendo seu histórico profissional..."):
+            with st.spinner("Lendo seu histórico..."):
                 texto_historico = extrair_texto_arquivos(uploaded_files)
             
-            # 2. Processar Imagens (Vaga)
+            texto_github = ""
+            github_links = extrair_repositorios(links_input + " " + extra_context)
+            if github_links:
+                with st.spinner(f"Buscando dados do GitHub..."):
+                    for usuario, repo in github_links:
+                        texto_github += buscar_info_github(usuario, repo)
+            
+            dados_completos = f"{texto_historico}\n\n--- DADOS GITHUB ---\n{texto_github}"
+            dados_completos = truncar_texto(dados_completos)
+            
             imagens_b64 = []
             if uploaded_images:
-                with st.spinner("Analisando os prints da vaga (Visão Computacional)..."):
+                with st.spinner("Analisando prints..."):
                     for img in uploaded_images:
                         imagens_b64.append(codificar_imagem(img))
             
-
-
-
-            # #    --- OTIMIZAÇÃO DE CACHE ---
-            # # Criamos uma "assinatura" única do pedido juntando histórico + contexto
-            # # Nota: O cache funciona melhor com texto. Se a imagem mudar, o cache pode não pegar 
-            # # a menos que convertamos a imagem em texto antes.
-            assinatura_pedido = f"{texto_historico[:5000]} || {extra_context}"
-            
-            html_final = None
-            origem = ""
-
-            ## LÓGICA QUE UTILIZA O REDIS COMENTADA ########################
-
-            # with st.spinner("Verificando banco de vetores (Cache Inteligente)..."):
-            #     html_cached = buscar_cache(assinatura_pedido, threshold=0.05)
-            
-            if False and html_cached: ## PROPOSITAL PARA NÃO RODAR
-                html_final = html_cached
-                origem = "⚡ CACHE REDIS (Custo Zero)"
-                st.balloons()
-            ### #################
-            else:
-                with st.spinner("Gerando com OpenAI (Consumindo Tokens)..."):
-                    html_final = gerar_html_curriculo(
-                        API_KEY, 
-                        texto_historico, 
-                        extra_context, 
-                        imagens_vagas=imagens_b64
-                    )
-                    # Salva no Redis para a próxima vez
-                    # salvar_cache(assinatura_pedido, html_final)
-                    origem = "🧠 OPENAI (Novo Gerado)"
-
-            # Feedback visual da economia
-            if "CACHE" in origem:
-                st.success(f"Sucesso! Resultado carregado do {origem}.")
-            else:
-                st.info(f"Resultado gerado via {origem}.")
-            
-            # 4. Salvar e Mostrar
-            caminho_arquivo = f"output/{nome_arquivo.strip()}.html"
-            with open(caminho_arquivo, "w", encoding="utf-8") as f:
-                f.write(html_final)
-            
-            st.success("✅ Currículo Gerado! A IA leu a vaga e adaptou seu perfil.")
-            
-            col_download, col_view = st.columns([1, 2])
-            with col_download:
-                st.download_button(
-                    label="📥 Baixar HTML",
-                    data=html_final,
-                    file_name=f"{nome_arquivo.strip()}.html",
-                    mime="text/html"
+            prov_id = "openai" if provider == "OpenAI" else "groq"
+            with st.spinner(f"IA selecionando e gerando o melhor CV..."):
+                html_final = gerar_html_curriculo(
+                    API_KEY, 
+                    dados_completos, 
+                    extra_context, 
+                    imagens_vagas=imagens_b64,
+                    provider=prov_id,
+                    job_text=job_description_text
                 )
+
+            caminho_html = f"output/{nome_arquivo.strip()}.html"
+            with open(caminho_html, "w", encoding="utf-8") as f:
+                f.write(html_final)
+
+            st.success("✅ Currículo Gerado com Sucesso!")
             
+            st.download_button(
+                label="📥 Baixar HTML Premium",
+                data=html_final,
+                file_name=f"{nome_arquivo.strip()}.html",
+                mime="text/html",
+                use_container_width=True
+            )
+            
+            html_preview = f"<style>body {{ background: white; }}</style>{html_final}"
             st.markdown("---")
             st.subheader("Pré-visualização:")
-
-            html_preview = f"""
-            <style>
-                body {{
-                    background-color: #FFFFFF !important; /* Força fundo branco */
-                    margin: 0; 
-                    padding: 0;
-                }}
-                /* Opcional: Centraliza o conteúdo visualmente como uma folha A4 */
-                .container {{
-                    min-height: 100vh;
-                }}
-            </style>
-            {html_final}
-            """
-
-            st.markdown("---")
             components.html(html_preview, height=800, scrolling=True)
 
         except Exception as e:
-            st.error(f"Ocorreu um erro: {e}")
+            st.error(f"Erro: {e}")
